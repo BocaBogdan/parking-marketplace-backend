@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from parking_marketplace_backend.api.routes.admin_reservations import router as admin_reservations_router
 from parking_marketplace_backend.api.routes.admin_spots import router as admin_spots_router
@@ -12,6 +13,18 @@ from parking_marketplace_backend.api.routes.users import router as users_router
 from parking_marketplace_backend.api.routes.spots import router as spots_router
 
 app = FastAPI()
+
+# Local dev origins for the React frontend (Vite's default port, plus common alternates).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
