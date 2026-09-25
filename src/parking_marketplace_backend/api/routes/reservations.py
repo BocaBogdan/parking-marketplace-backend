@@ -1,4 +1,5 @@
-from datetime import timedelta
+import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -10,13 +11,14 @@ from parking_marketplace_backend.core.deps import get_current_user
 from parking_marketplace_backend.database import get_db
 from parking_marketplace_backend.models import User
 from parking_marketplace_backend.models.car import Car
-from parking_marketplace_backend.models.reservation import Reservation
+from parking_marketplace_backend.models.reservation import Reservation, ReservationStatus
 from parking_marketplace_backend.models.spot import Spot, SpotStatus
 from parking_marketplace_backend.schemas.reservation import ReservationCreate, ReservationRead
 
 router = APIRouter(prefix="/reservations", tags=["reservations"])
 
 SLOT_DURATION = timedelta(minutes=30)
+CANCELLATION_CUTOFF = timedelta(minutes=15)
 
 
 @router.post("/", response_model=ReservationRead, status_code=status.HTTP_201_CREATED)
@@ -92,3 +94,36 @@ def get_my_reservations(
         .order_by(Reservation.start_at.desc())
     )
     return db.scalars(stmt).all()
+
+
+@router.delete("/{reservation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_reservation(
+        reservation_id: uuid.UUID,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+):
+    reservation = db.scalar(
+        select(Reservation).where(
+            Reservation.id == reservation_id,
+            Reservation.user_id == current_user.id,
+        )
+    )
+    if not reservation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reservation not found")
+
+    if reservation.status != ReservationStatus.CONFIRMED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Reservation is already cancelled",
+        )
+
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    if now_utc > reservation.start_at - CANCELLATION_CUTOFF:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Reservations can only be cancelled at least 15 minutes before they start",
+        )
+
+    reservation.status = ReservationStatus.CANCELLED
+    db.commit()
+    return None
