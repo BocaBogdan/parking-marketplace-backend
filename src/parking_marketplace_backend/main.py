@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from parking_marketplace_backend.api.routes.admin_spots import router as admin_spots_router
 from parking_marketplace_backend.api.routes.auth import router as auth_router
 from parking_marketplace_backend.api.routes.cars import router as cars_router
 from parking_marketplace_backend.api.routes.overrides import router as overrides_router
@@ -22,6 +23,7 @@ def health_check():
     return {"status": "ok"}
 
 
+app.include_router(admin_spots_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(cars_router, prefix="/api/v1")
 app.include_router(overrides_router, prefix="/api/v1")

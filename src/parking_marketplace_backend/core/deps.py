@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from parking_marketplace_backend.core.security import decode_token
 from parking_marketplace_backend.database import get_db
-from parking_marketplace_backend.models.user import User
+from parking_marketplace_backend.models.user import User, UserRole
 
 bearer_scheme = HTTPBearer()
 
@@ -29,3 +29,9 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
 
     return user
+
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return current_user

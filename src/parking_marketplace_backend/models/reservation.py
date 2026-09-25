@@ -12,6 +12,7 @@ from parking_marketplace_backend.database import Base
 class ReservationStatus(str, enum.Enum):
     CONFIRMED = "CONFIRMED"
     CANCELLED = "CANCELLED"
+    CANCELLED_BY_ADMIN = "CANCELLED_BY_ADMIN"
 
 
 class Reservation(Base):

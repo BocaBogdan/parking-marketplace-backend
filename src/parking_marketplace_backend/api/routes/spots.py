@@ -38,6 +38,7 @@ def create_spot(
 ):
     new_spot = Spot(
         spot_number=payload.spot_number,
+        notes=payload.notes,
         user_id = current_user.id
     )
 
@@ -136,6 +137,7 @@ def get_available_spots(
 def update_spot(
         spot_id: uuid.UUID,
         payload: SpotUpdate,
+        current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
     current_spot = db.scalar(select(Spot).where(Spot.id == spot_id))
@@ -143,12 +145,20 @@ def update_spot(
     if not current_spot:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Spot not found")
 
+    if current_spot.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not own this spot")
+
     update_data = payload.model_dump(exclude_unset=True)
 
-    if "status" in update_data:
-        current_spot.status = update_data["status"]
     if "spot_number" in update_data:
         current_spot.spot_number = update_data["spot_number"]
+    if "notes" in update_data:
+        current_spot.notes = update_data["notes"]
+
+    # Editing a rejected spot is how an owner re-submits it for review.
+    if current_spot.status == SpotStatus.REJECTED:
+        current_spot.status = SpotStatus.PENDING
+        current_spot.rejection_reason = None
 
     try:
         db.commit()

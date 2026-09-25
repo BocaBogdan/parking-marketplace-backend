@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Enum, DateTime, ForeignKey, func
+from sqlalchemy import Enum, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from parking_marketplace_backend.database import Base
@@ -25,5 +25,7 @@ class Spot(Base):
         nullable=False
     )
     spot_number: Mapped[int] = mapped_column(nullable=False, unique=True)
+    notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
