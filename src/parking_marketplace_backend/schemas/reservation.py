@@ -30,3 +30,16 @@ class ReservationRead(BaseModel):
     status: ReservationStatus
     created_at: datetime
     updated_at: datetime
+
+
+class OwnerReservationRead(BaseModel):
+    """Reservation view for the spot's owner only — includes the driver's contact info,
+    which must never appear in a public or driver-facing response."""
+
+    id: uuid.UUID
+    start_at: datetime
+    end_at: datetime
+    status: ReservationStatus
+    driver_name: str
+    driver_phone: str
+    car_plate: str
