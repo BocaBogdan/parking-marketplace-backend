@@ -43,3 +43,24 @@ class OwnerReservationRead(BaseModel):
     driver_name: str
     driver_phone: str
     car_plate: str
+
+
+class AdminReservationRead(BaseModel):
+    """Audit view for admins — spans every spot, not just ones the caller owns."""
+
+    id: uuid.UUID
+    spot_id: uuid.UUID
+    spot_number: int
+    driver_name: str
+    driver_apartment_number: str
+    car_plate: str
+    start_at: datetime
+    end_at: datetime
+    status: ReservationStatus
+
+
+class PaginatedAdminReservations(BaseModel):
+    items: list[AdminReservationRead]
+    total: int
+    page: int
+    page_size: int
