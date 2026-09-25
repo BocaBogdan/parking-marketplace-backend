@@ -1,6 +1,6 @@
 import uuid
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from sqlalchemy import func, select
 
+from parking_marketplace_backend.core.availability import day_segments, fully_covers, overlaps
 from parking_marketplace_backend.core.deps import get_current_user
 from parking_marketplace_backend.database import get_db
 from parking_marketplace_backend.models import User
@@ -27,29 +28,6 @@ _WEEKDAY_BY_PY_INDEX = [
     DayOfWeek.SAT,
     DayOfWeek.SUN,
 ]
-
-
-def _day_segments(window_from: datetime, window_to: datetime) -> list[tuple[date, time, time]]:
-    """Split a (possibly multi-day) window into one (date, start_time, end_time) segment per day."""
-    segments = []
-    current_date = window_from.date()
-    last_date = window_to.date()
-
-    while current_date <= last_date:
-        seg_start = window_from.time() if current_date == window_from.date() else time.min
-        seg_end = window_to.time() if current_date == last_date else time.max
-        segments.append((current_date, seg_start, seg_end))
-        current_date += timedelta(days=1)
-
-    return segments
-
-
-def _fully_covers(seg_start: time, seg_end: time, intervals: list[tuple[time, time]]) -> bool:
-    return any(start <= seg_start and end >= seg_end for start, end in intervals)
-
-
-def _overlaps(seg_start: time, seg_end: time, intervals: list[tuple[time, time]]) -> bool:
-    return any(start < seg_end and end > seg_start for start, end in intervals)
 
 
 @router.post("/", response_model=SpotRead)
@@ -122,7 +100,7 @@ def get_available_spots(
             (override.start_time, override.end_time)
         )
 
-    segments = _day_segments(from_, to)
+    segments = day_segments(from_, to)
 
     available_spots = []
     for spot in approved_spots:
@@ -134,7 +112,7 @@ def get_available_spots(
             day_overrides = spot_overrides.get(seg_date, {})
 
             busy_intervals = day_overrides.get(OverrideStatus.BUSY, [])
-            if _overlaps(seg_start, seg_end, busy_intervals):
+            if overlaps(seg_start, seg_end, busy_intervals):
                 is_available = False
                 break
 
@@ -142,7 +120,7 @@ def get_available_spots(
             weekday = _WEEKDAY_BY_PY_INDEX[seg_date.weekday()]
             schedule_intervals = spot_schedules.get(weekday, [])
 
-            if not _fully_covers(seg_start, seg_end, free_intervals) and not _fully_covers(
+            if not fully_covers(seg_start, seg_end, free_intervals) and not fully_covers(
                 seg_start, seg_end, schedule_intervals
             ):
                 is_available = False
