@@ -1,4 +1,5 @@
 from parking_marketplace_backend.models.car import Car
+from parking_marketplace_backend.models.spot import Spot
 from parking_marketplace_backend.models.user import User
 
-__all__ = ["Car", "User"]
+__all__ = ["Car", "Spot", "User"]
