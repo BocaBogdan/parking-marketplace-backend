@@ -53,7 +53,7 @@ def create_reservation(
     if not car:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Car not found")
 
-    end_at = payload.start_at + SLOT_DURATION
+    end_at = payload.end_at or (payload.start_at + SLOT_DURATION)
 
     if not is_spot_available(db, spot.id, payload.start_at, end_at):
         raise HTTPException(

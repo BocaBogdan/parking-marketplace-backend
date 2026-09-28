@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from parking_marketplace_backend.models.override import OverrideStatus, SpotOverride
+from parking_marketplace_backend.models.reservation import Reservation, ReservationStatus
 from parking_marketplace_backend.models.schedule import DayOfWeek, Schedule
 
 WEEKDAY_BY_PY_INDEX = [
@@ -41,9 +42,29 @@ def overlaps(seg_start: time, seg_end: time, intervals: list[tuple[time, time]])
     return any(start < seg_end and end > seg_start for start, end in intervals)
 
 
+def has_overlapping_confirmed_reservation(
+    db: Session, spot_id: uuid.UUID, window_from: datetime, window_to: datetime
+) -> bool:
+    stmt = (
+        select(Reservation.id)
+        .where(
+            Reservation.spot_id == spot_id,
+            Reservation.status == ReservationStatus.CONFIRMED,
+            Reservation.start_at < window_to,
+            Reservation.end_at > window_from,
+        )
+        .limit(1)
+    )
+    return db.scalar(stmt) is not None
+
+
 def is_spot_available(db: Session, spot_id: uuid.UUID, window_from: datetime, window_to: datetime) -> bool:
-    """A spot is available for [window_from, window_to) if, for every day the window touches,
-    no BUSY override overlaps it and a schedule row or FREE override fully covers it."""
+    """A spot is available for [window_from, window_to) if no CONFIRMED reservation
+    overlaps it and, for every day the window touches, no BUSY override overlaps it
+    and a schedule row or FREE override fully covers it."""
+    if has_overlapping_confirmed_reservation(db, spot_id, window_from, window_to):
+        return False
+
     schedule_intervals_by_day: dict[DayOfWeek, list[tuple[time, time]]] = {}
     for schedule in db.scalars(select(Schedule).where(Schedule.spot_id == spot_id)):
         schedule_intervals_by_day.setdefault(schedule.day_of_week, []).append(

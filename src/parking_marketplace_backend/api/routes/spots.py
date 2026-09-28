@@ -13,6 +13,7 @@ from parking_marketplace_backend.core.deps import get_current_user
 from parking_marketplace_backend.database import get_db
 from parking_marketplace_backend.models import User
 from parking_marketplace_backend.models.override import OverrideStatus, SpotOverride
+from parking_marketplace_backend.models.reservation import Reservation, ReservationStatus
 from parking_marketplace_backend.models.schedule import DayOfWeek, Schedule
 from parking_marketplace_backend.models.spot import Spot, SpotStatus
 from parking_marketplace_backend.schemas.spot import SpotRead, SpotCreate, SpotUpdate
@@ -101,10 +102,26 @@ def get_available_spots(
             (override.start_time, override.end_time)
         )
 
+    reserved_spot_ids = set(
+        db.scalars(
+            select(Reservation.spot_id)
+            .where(
+                Reservation.spot_id.in_(spot_ids),
+                Reservation.status == ReservationStatus.CONFIRMED,
+                Reservation.start_at < to,
+                Reservation.end_at > from_,
+            )
+            .distinct()
+        ).all()
+    )
+
     segments = day_segments(from_, to)
 
     available_spots = []
     for spot in approved_spots:
+        if spot.id in reserved_spot_ids:
+            continue
+
         spot_schedules = schedules_by_spot.get(spot.id, {})
         spot_overrides = overrides_by_spot.get(spot.id, {})
 
