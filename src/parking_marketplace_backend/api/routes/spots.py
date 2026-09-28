@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from parking_marketplace_backend.core.availability import day_segments, fully_covers, overlaps
 from parking_marketplace_backend.core.deps import get_current_user
@@ -171,13 +171,23 @@ def update_spot(
     return current_spot
 
 @router.delete("/{spot_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_spot(spot_id: uuid.UUID, db: Session = Depends(get_db)):
+def delete_spot(
+        spot_id: uuid.UUID,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+):
     current_spot = db.scalar(select(Spot).where(Spot.id == spot_id))
 
     if not current_spot:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Spot not found")
 
-    db.delete(current_spot)
+    if current_spot.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not own this spot")
+
+    if current_spot.status == SpotStatus.INACTIVE:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Spot is already inactive")
+
+    current_spot.status = SpotStatus.INACTIVE
 
     db.commit()
     return None

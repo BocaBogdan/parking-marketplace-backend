@@ -9,8 +9,7 @@ from parking_marketplace_backend.database import Base
 
 
 class UserRole(str, enum.Enum):
-    DRIVER = "DRIVER"
-    OWNER = "OWNER"
+    USER = "USER"
     ADMIN = "ADMIN"
 
 
@@ -25,8 +24,8 @@ class User(Base):
     password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="user_role"),
-        default=UserRole.DRIVER,
-        server_default=UserRole.DRIVER.value,
+        default=UserRole.USER,
+        server_default=UserRole.USER.value,
         nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
