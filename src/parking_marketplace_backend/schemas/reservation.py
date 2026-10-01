@@ -37,10 +37,9 @@ class ReservationCreate(BaseModel):
 
 
 class ReservationRead(BaseModel):
-    model_config = {"from_attributes": True}
-
     id: uuid.UUID
     spot_id: uuid.UUID
+    spot_number: int
     car_id: uuid.UUID
     start_at: datetime
     end_at: datetime

@@ -80,7 +80,17 @@ def create_reservation(
         )
 
     db.refresh(new_reservation)
-    return new_reservation
+    return ReservationRead(
+        id=new_reservation.id,
+        spot_id=new_reservation.spot_id,
+        spot_number=spot.spot_number,
+        car_id=new_reservation.car_id,
+        start_at=new_reservation.start_at,
+        end_at=new_reservation.end_at,
+        status=new_reservation.status,
+        created_at=new_reservation.created_at,
+        updated_at=new_reservation.updated_at,
+    )
 
 
 @router.get("/mine", response_model=list[ReservationRead])
@@ -89,11 +99,25 @@ def get_my_reservations(
         db: Session = Depends(get_db),
 ):
     stmt = (
-        select(Reservation)
+        select(Reservation, Spot.spot_number)
+        .join(Spot, Spot.id == Reservation.spot_id)
         .where(Reservation.user_id == current_user.id)
         .order_by(Reservation.start_at.desc())
     )
-    return db.scalars(stmt).all()
+    return [
+        ReservationRead(
+            id=reservation.id,
+            spot_id=reservation.spot_id,
+            spot_number=spot_number,
+            car_id=reservation.car_id,
+            start_at=reservation.start_at,
+            end_at=reservation.end_at,
+            status=reservation.status,
+            created_at=reservation.created_at,
+            updated_at=reservation.updated_at,
+        )
+        for reservation, spot_number in db.execute(stmt).all()
+    ]
 
 
 @router.delete("/{reservation_id}", status_code=status.HTTP_204_NO_CONTENT)
