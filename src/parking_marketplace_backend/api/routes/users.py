@@ -2,7 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from parking_marketplace_backend.database import get_db
 from parking_marketplace_backend.schemas.user import UserRead
@@ -12,13 +12,14 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.get("/", response_model=list[UserRead])
-def get_users(db: Session = Depends(get_db)):
-    return db.scalars(select(User)).all()
+async def get_users(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User))
+    return result.scalars().all()
 
 
 @router.get("/{user_id}", response_model=UserRead)
-def get_user(user_id: uuid.UUID, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.id == user_id))
+async def get_user(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return user

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from parking_marketplace_backend.core.availability import is_spot_available
 from parking_marketplace_backend.core.deps import get_current_user
@@ -22,12 +22,13 @@ CANCELLATION_CUTOFF = timedelta(minutes=15)
 
 
 @router.post("/", response_model=ReservationRead, status_code=status.HTTP_201_CREATED)
-def create_reservation(
+async def create_reservation(
         payload: ReservationCreate,
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
 ):
-    spot = db.scalar(select(Spot).where(Spot.id == payload.spot_id))
+    result = await db.execute(select(Spot).where(Spot.id == payload.spot_id))
+    spot = result.scalar_one_or_none()
     if not spot:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Spot not found")
 
@@ -43,19 +44,20 @@ def create_reservation(
             detail="You cannot reserve your own spot",
         )
 
-    car = db.scalar(
+    result = await db.execute(
         select(Car).where(
             Car.id == payload.car_id,
             Car.user_id == current_user.id,
             Car.deleted_at.is_(None),
         )
     )
+    car = result.scalar_one_or_none()
     if not car:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Car not found")
 
     end_at = payload.end_at or (payload.start_at + SLOT_DURATION)
 
-    if not is_spot_available(db, spot.id, payload.start_at, end_at):
+    if not await is_spot_available(db, spot.id, payload.start_at, end_at):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Spot is not available for this window",
@@ -71,15 +73,15 @@ def create_reservation(
     db.add(new_reservation)
 
     try:
-        db.commit()
+        await db.commit()
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This spot is already reserved for an overlapping window",
         )
 
-    db.refresh(new_reservation)
+    await db.refresh(new_reservation)
     return ReservationRead(
         id=new_reservation.id,
         spot_id=new_reservation.spot_id,
@@ -94,9 +96,9 @@ def create_reservation(
 
 
 @router.get("/mine", response_model=list[ReservationRead])
-def get_my_reservations(
+async def get_my_reservations(
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
 ):
     stmt = (
         select(Reservation, Spot.spot_number)
@@ -104,6 +106,7 @@ def get_my_reservations(
         .where(Reservation.user_id == current_user.id)
         .order_by(Reservation.start_at.desc())
     )
+    result = await db.execute(stmt)
     return [
         ReservationRead(
             id=reservation.id,
@@ -116,22 +119,23 @@ def get_my_reservations(
             created_at=reservation.created_at,
             updated_at=reservation.updated_at,
         )
-        for reservation, spot_number in db.execute(stmt).all()
+        for reservation, spot_number in result.all()
     ]
 
 
 @router.delete("/{reservation_id}", status_code=status.HTTP_204_NO_CONTENT)
-def cancel_reservation(
+async def cancel_reservation(
         reservation_id: uuid.UUID,
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
 ):
-    reservation = db.scalar(
+    result = await db.execute(
         select(Reservation).where(
             Reservation.id == reservation_id,
             Reservation.user_id == current_user.id,
         )
     )
+    reservation = result.scalar_one_or_none()
     if not reservation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reservation not found")
 
@@ -149,5 +153,5 @@ def cancel_reservation(
         )
 
     reservation.status = ReservationStatus.CANCELLED
-    db.commit()
+    await db.commit()
     return None

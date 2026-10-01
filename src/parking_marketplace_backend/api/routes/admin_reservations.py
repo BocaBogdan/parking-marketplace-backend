@@ -3,7 +3,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from parking_marketplace_backend.core.deps import require_admin
 from parking_marketplace_backend.database import get_db
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/admin/reservations", tags=["admin"])
 
 
 @router.get("/", response_model=PaginatedAdminReservations)
-def list_all_reservations(
+async def list_all_reservations(
         spot_id: uuid.UUID | None = Query(default=None),
         from_: datetime | None = Query(default=None, alias="from"),
         to: datetime | None = Query(default=None),
@@ -25,7 +25,7 @@ def list_all_reservations(
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=50, ge=1, le=200),
         _admin: User = Depends(require_admin),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
 ):
     if from_ is not None and to is not None and to < from_:
         raise HTTPException(
@@ -49,7 +49,8 @@ def list_all_reservations(
     if status_filter is not None:
         base_stmt = base_stmt.where(Reservation.status == status_filter)
 
-    total = db.scalar(select(func.count()).select_from(base_stmt.subquery()))
+    count_result = await db.execute(select(func.count()).select_from(base_stmt.subquery()))
+    total = count_result.scalar_one()
 
     page_stmt = (
         base_stmt
@@ -58,6 +59,7 @@ def list_all_reservations(
         .limit(page_size)
     )
 
+    result = await db.execute(page_stmt)
     items = [
         AdminReservationRead(
             id=reservation.id,
@@ -70,7 +72,7 @@ def list_all_reservations(
             end_at=reservation.end_at,
             status=reservation.status,
         )
-        for reservation, spot_number, driver_name, driver_apartment_number, car_plate in db.execute(page_stmt).all()
+        for reservation, spot_number, driver_name, driver_apartment_number, car_plate in result.all()
     ]
 
     return PaginatedAdminReservations(items=items, total=total, page=page, page_size=page_size)

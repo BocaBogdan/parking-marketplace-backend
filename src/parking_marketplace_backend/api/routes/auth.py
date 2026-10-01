@@ -4,7 +4,7 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from parking_marketplace_backend.core.security import (
     create_access_token,
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-def register(payload: UserCreate, db: Session = Depends(get_db)):
+async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
     new_user = User(
         name=payload.name,
         apartment_number=payload.apartment_number,
@@ -33,21 +33,22 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
 
     db.add(new_user)
     try:
-        db.commit()
+        await db.commit()
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A user with this email or phone already exists",
         )
 
-    db.refresh(new_user)
+    await db.refresh(new_user)
     return new_user
 
 
 @router.post("/login", response_model=TokenPair)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.email == payload.email))
+async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
     if not user or not verify_password(payload.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -61,7 +62,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=TokenPair)
-def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
+async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     try:
         claims = decode_token(payload.refresh_token)
     except jwt.PyJWTError:
@@ -77,7 +78,7 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
         )
 
     user_id = uuid.UUID(claims["sub"])
-    user = db.get(User, user_id)
+    user = await db.get(User, user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

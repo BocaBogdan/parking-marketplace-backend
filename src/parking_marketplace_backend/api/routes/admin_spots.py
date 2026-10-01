@@ -2,7 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from parking_marketplace_backend.core.deps import require_admin
 from parking_marketplace_backend.database import get_db
@@ -14,24 +14,26 @@ from parking_marketplace_backend.schemas.spot import AdminSpotRead, RejectSpotRe
 router = APIRouter(prefix="/admin/spots", tags=["admin"])
 
 
-def _get_spot_or_404(db: Session, spot_id: uuid.UUID) -> Spot:
-    spot = db.scalar(select(Spot).where(Spot.id == spot_id))
+async def _get_spot_or_404(db: AsyncSession, spot_id: uuid.UUID) -> Spot:
+    result = await db.execute(select(Spot).where(Spot.id == spot_id))
+    spot = result.scalar_one_or_none()
     if not spot:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Spot not found")
     return spot
 
 
 @router.get("/", response_model=list[AdminSpotRead])
-def list_spots_for_review(
+async def list_spots_for_review(
         status_filter: SpotStatus | None = Query(default=None, alias="status"),
         _admin: User = Depends(require_admin),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Spot, User.name, User.apartment_number).join(User, User.id == Spot.user_id)
     if status_filter is not None:
         stmt = stmt.where(Spot.status == status_filter)
     stmt = stmt.order_by(Spot.created_at.asc())
 
+    result = await db.execute(stmt)
     return [
         AdminSpotRead(
             id=spot.id,
@@ -44,17 +46,17 @@ def list_spots_for_review(
             created_at=spot.created_at,
             updated_at=spot.updated_at,
         )
-        for spot, owner_name, owner_apartment_number in db.execute(stmt).all()
+        for spot, owner_name, owner_apartment_number in result.all()
     ]
 
 
 @router.patch("/{spot_id}/approve", response_model=SpotRead)
-def approve_spot(
+async def approve_spot(
         spot_id: uuid.UUID,
         _admin: User = Depends(require_admin),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
 ):
-    spot = _get_spot_or_404(db, spot_id)
+    spot = await _get_spot_or_404(db, spot_id)
 
     if spot.status != SpotStatus.PENDING:
         raise HTTPException(
@@ -65,19 +67,19 @@ def approve_spot(
     spot.status = SpotStatus.APPROVED
     spot.rejection_reason = None
 
-    db.commit()
-    db.refresh(spot)
+    await db.commit()
+    await db.refresh(spot)
     return spot
 
 
 @router.patch("/{spot_id}/reject", response_model=SpotRead)
-def reject_spot(
+async def reject_spot(
         spot_id: uuid.UUID,
         payload: RejectSpotRequest,
         _admin: User = Depends(require_admin),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
 ):
-    spot = _get_spot_or_404(db, spot_id)
+    spot = await _get_spot_or_404(db, spot_id)
 
     if spot.status not in (SpotStatus.PENDING, SpotStatus.APPROVED):
         raise HTTPException(
@@ -88,12 +90,12 @@ def reject_spot(
     spot.status = SpotStatus.REJECTED
     spot.rejection_reason = payload.rejection_reason
 
-    db.execute(
+    await db.execute(
         update(Reservation)
         .where(Reservation.spot_id == spot.id, Reservation.status == ReservationStatus.CONFIRMED)
         .values(status=ReservationStatus.CANCELLED_BY_ADMIN)
     )
 
-    db.commit()
-    db.refresh(spot)
+    await db.commit()
+    await db.refresh(spot)
     return spot

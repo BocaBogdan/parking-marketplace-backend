@@ -4,7 +4,7 @@ from datetime import date, datetime, time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select
 
@@ -32,10 +32,10 @@ _WEEKDAY_BY_PY_INDEX = [
 
 
 @router.post("/", response_model=SpotRead)
-def create_spot(
+async def create_spot(
         payload: SpotCreate,
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
+        db: AsyncSession = Depends(get_db)
 ):
     new_spot = Spot(
         spot_number=payload.spot_number,
@@ -45,33 +45,34 @@ def create_spot(
 
     db.add(new_spot)
     try:
-        db.commit()
+        await db.commit()
     except:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This spot already exists")
 
-    db.refresh(new_spot)
+    await db.refresh(new_spot)
 
     return new_spot
 
 @router.get("/mine", response_model=list[SpotRead])
-def get_my_spots(
+async def get_my_spots(
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
+        db: AsyncSession = Depends(get_db)
 ):
     stmt = (
         select(Spot)
         .where(Spot.user_id == current_user.id)
         .order_by(Spot.spot_number.asc())
     )
-    return db.scalars(stmt).all()
+    result = await db.execute(stmt)
+    return result.scalars().all()
 
 @router.get("/available", response_model=list[SpotRead])
-def get_available_spots(
+async def get_available_spots(
         from_: datetime = Query(alias="from"),
         to: datetime = Query(),
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
 ):
     if to <= from_:
         raise HTTPException(
@@ -79,14 +80,16 @@ def get_available_spots(
             detail="'to' must be after 'from'",
         )
 
-    approved_spots = db.scalars(select(Spot).where(Spot.status == SpotStatus.APPROVED)).all()
+    result = await db.execute(select(Spot).where(Spot.status == SpotStatus.APPROVED))
+    approved_spots = result.scalars().all()
     if not approved_spots:
         return []
 
     spot_ids = [spot.id for spot in approved_spots]
 
     schedules_by_spot: dict[uuid.UUID, dict[DayOfWeek, list[tuple[time, time]]]] = defaultdict(lambda: defaultdict(list))
-    for schedule in db.scalars(select(Schedule).where(Schedule.spot_id.in_(spot_ids))):
+    result = await db.execute(select(Schedule).where(Schedule.spot_id.in_(spot_ids)))
+    for schedule in result.scalars():
         schedules_by_spot[schedule.spot_id][schedule.day_of_week].append((schedule.start_time, schedule.end_time))
 
     overrides_by_spot: dict[uuid.UUID, dict[date, dict[OverrideStatus, list[tuple[time, time]]]]] = defaultdict(
@@ -97,23 +100,23 @@ def get_available_spots(
         SpotOverride.date >= from_.date(),
         SpotOverride.date <= to.date(),
     )
-    for override in db.scalars(overrides_stmt):
+    result = await db.execute(overrides_stmt)
+    for override in result.scalars():
         overrides_by_spot[override.spot_id][override.date][override.status].append(
             (override.start_time, override.end_time)
         )
 
-    reserved_spot_ids = set(
-        db.scalars(
-            select(Reservation.spot_id)
-            .where(
-                Reservation.spot_id.in_(spot_ids),
-                Reservation.status == ReservationStatus.CONFIRMED,
-                Reservation.start_at < to,
-                Reservation.end_at > from_,
-            )
-            .distinct()
-        ).all()
+    result = await db.execute(
+        select(Reservation.spot_id)
+        .where(
+            Reservation.spot_id.in_(spot_ids),
+            Reservation.status == ReservationStatus.CONFIRMED,
+            Reservation.start_at < to,
+            Reservation.end_at > from_,
+        )
+        .distinct()
     )
+    reserved_spot_ids = set(result.scalars().all())
 
     segments = day_segments(from_, to)
 
@@ -151,13 +154,14 @@ def get_available_spots(
 
 
 @router.put("/{spot_id}", response_model=SpotRead)
-def update_spot(
+async def update_spot(
         spot_id: uuid.UUID,
         payload: SpotUpdate,
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
+        db: AsyncSession = Depends(get_db)
 ):
-    current_spot = db.scalar(select(Spot).where(Spot.id == spot_id))
+    result = await db.execute(select(Spot).where(Spot.id == spot_id))
+    current_spot = result.scalar_one_or_none()
 
     if not current_spot:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Spot not found")
@@ -178,22 +182,23 @@ def update_spot(
         current_spot.rejection_reason = None
 
     try:
-        db.commit()
+        await db.commit()
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This spot already exists")
 
 
-    db.refresh(current_spot)
+    await db.refresh(current_spot)
     return current_spot
 
 @router.delete("/{spot_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_spot(
+async def delete_spot(
         spot_id: uuid.UUID,
         current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        db: AsyncSession = Depends(get_db),
 ):
-    current_spot = db.scalar(select(Spot).where(Spot.id == spot_id))
+    result = await db.execute(select(Spot).where(Spot.id == spot_id))
+    current_spot = result.scalar_one_or_none()
 
     if not current_spot:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Spot not found")
@@ -206,5 +211,5 @@ def delete_spot(
 
     current_spot.status = SpotStatus.INACTIVE
 
-    db.commit()
+    await db.commit()
     return None

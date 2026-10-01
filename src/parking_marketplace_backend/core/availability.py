@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from parking_marketplace_backend.models.override import OverrideStatus, SpotOverride
 from parking_marketplace_backend.models.reservation import Reservation, ReservationStatus
@@ -20,7 +20,6 @@ WEEKDAY_BY_PY_INDEX = [
 
 
 def day_segments(window_from: datetime, window_to: datetime) -> list[tuple[date, time, time]]:
-    """Split a (possibly multi-day) window into one (date, start_time, end_time) segment per day."""
     segments = []
     current_date = window_from.date()
     last_date = window_to.date()
@@ -42,8 +41,8 @@ def overlaps(seg_start: time, seg_end: time, intervals: list[tuple[time, time]])
     return any(start < seg_end and end > seg_start for start, end in intervals)
 
 
-def has_overlapping_confirmed_reservation(
-    db: Session, spot_id: uuid.UUID, window_from: datetime, window_to: datetime
+async def has_overlapping_confirmed_reservation(
+    db: AsyncSession, spot_id: uuid.UUID, window_from: datetime, window_to: datetime
 ) -> bool:
     stmt = (
         select(Reservation.id)
@@ -55,18 +54,17 @@ def has_overlapping_confirmed_reservation(
         )
         .limit(1)
     )
-    return db.scalar(stmt) is not None
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none() is not None
 
 
-def is_spot_available(db: Session, spot_id: uuid.UUID, window_from: datetime, window_to: datetime) -> bool:
-    """A spot is available for [window_from, window_to) if no CONFIRMED reservation
-    overlaps it and, for every day the window touches, no BUSY override overlaps it
-    and a schedule row or FREE override fully covers it."""
-    if has_overlapping_confirmed_reservation(db, spot_id, window_from, window_to):
+async def is_spot_available(db: AsyncSession, spot_id: uuid.UUID, window_from: datetime, window_to: datetime) -> bool:
+    if await has_overlapping_confirmed_reservation(db, spot_id, window_from, window_to):
         return False
 
     schedule_intervals_by_day: dict[DayOfWeek, list[tuple[time, time]]] = {}
-    for schedule in db.scalars(select(Schedule).where(Schedule.spot_id == spot_id)):
+    result = await db.execute(select(Schedule).where(Schedule.spot_id == spot_id))
+    for schedule in result.scalars():
         schedule_intervals_by_day.setdefault(schedule.day_of_week, []).append(
             (schedule.start_time, schedule.end_time)
         )
@@ -77,7 +75,8 @@ def is_spot_available(db: Session, spot_id: uuid.UUID, window_from: datetime, wi
         SpotOverride.date >= window_from.date(),
         SpotOverride.date <= window_to.date(),
     )
-    for override in db.scalars(overrides_stmt):
+    result = await db.execute(overrides_stmt)
+    for override in result.scalars():
         overrides_by_day.setdefault(override.date, {}).setdefault(override.status, []).append(
             (override.start_time, override.end_time)
         )
