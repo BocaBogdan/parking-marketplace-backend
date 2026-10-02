@@ -257,7 +257,7 @@ Do not commit secrets or environment-specific credentials to the repository.
 ### Run the Development Server
 
 ```bash
-uvicorn app.main:app --reload
+uvicorn parking_marketplace_backend.main:app --reload
 ```
 
 The API will be available at:
